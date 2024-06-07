@@ -16,6 +16,7 @@ from .auth import AuthInterface, NoAuth
 
 class Cache(ABC):
     """
+    ABC在Python中代表"Abstract Base Class"(抽象基类)
     Define the interface for a cache that can be used to store data in a Flask app.
     """
 
@@ -57,15 +58,18 @@ class Cache(ABC):
 
 class MemoryCache(Cache):
     def __init__(self):
+        # 初始化一个空的字典来作为缓存，用于存储对象的相关数据
         self.cache = {}
 
     def generate_id(self, *args, **kwargs):
+         # 使用uuid4生成一个随机的、全球唯一的标识符，并将其转换为字符串形式
         return str(uuid.uuid4())
 
     def set(self, id, field, value):
+        # 检查缓存中是否存在指定的ID，如果不存在，则初始化一个空字典
         if id not in self.cache:
             self.cache[id] = {}
-
+         # 将给定的字段-值对存储在缓存中指定的ID下
         self.cache[id][field] = value
 
     def get(self, id, field):
@@ -91,30 +95,45 @@ class VannaFlaskApp:
     flask_app = None
 
     def requires_cache(self, required_fields, optional_fields=[]):
+        """
+        创建一个装饰器，确保在调用被装饰的函数之前，缓存中存在特定的字段。
+
+        :param required_fields: 必需的字段名列表，这些字段必须存在于缓存中。
+        :param optional_fields: 可选的字段名列表，这些字段如果存在则从缓存中获取。
+        :return: 返回一个装饰器函数。
+        """
         def decorator(f):
             @wraps(f)
             def decorated(*args, **kwargs):
+                # 尝试从查询参数中获取id
                 id = request.args.get("id")
 
+                # 如果查询参数中没有id，尝试从请求体中获取
                 if id is None:
                     id = request.json.get("id")
+                    # 如果仍然找不到id，返回错误信息
                     if id is None:
-                        return jsonify({"type": "error", "error": "No id provided"})
+                        return jsonify({"type": "error", "error": "未提供id"})
 
+                # 检查所有必需的字段是否都在缓存中
                 for field in required_fields:
+                    # 如果缺少任何一个必需字段，返回错误信息
                     if self.cache.get(id=id, field=field) is None:
-                        return jsonify({"type": "error", "error": f"No {field} found"})
+                        return jsonify({"type": "error", "error": f"未找到 {field}"})
 
+                # 从缓存中收集必需字段的值
                 field_values = {
                     field: self.cache.get(id=id, field=field) for field in required_fields
                 }
 
+                # 添加可选字段的值（如果存在）到缓存中
                 for field in optional_fields:
                     field_values[field] = self.cache.get(id=id, field=field)
 
-                # Add the id to the field_values
+                # 将id添加到字段值中
                 field_values["id"] = id
 
+                # 调用被装饰的函数，传入收集到的字段值
                 return f(*args, **field_values, **kwargs)
 
             return decorated
@@ -122,14 +141,27 @@ class VannaFlaskApp:
         return decorator
 
     def requires_auth(self, f):
+        """
+        身份验证装饰器函数，用于在调用原函数前检查用户是否已认证。
+        
+        如用户未认证，返回包含登录表单的JSON响应。
+        若用户已认证，将用户对象传递给原函数并调用它。
+        
+        :param f: 需要被包装的原函数
+        :return: 包装后的函数
+        """
         @wraps(f)
         def decorated(*args, **kwargs):
+            # 根据当前请求从认证模块获取用户信息
             user = self.auth.get_user(flask.request)
 
+            # 检查用户是否已登录
             if not self.auth.is_logged_in(user):
-                return jsonify({"type": "not_logged_in", "html": self.auth.login_form()})
+                # 若未登录，返回含有登录表单的JSON响应
+                return jsonify({"type": "未登录", "html": self.auth.login_form()})
 
-            # Pass the user to the function
+            # 若已登录，调用原函数并传入用户对象
+            # 将用户信息传递给函数
             return f(*args, user=user, **kwargs)
 
         return decorated
@@ -142,16 +174,16 @@ class VannaFlaskApp:
                     title="Welcome to Vanna.AI",
                     subtitle="Your AI-powered copilot for SQL queries.",
                     show_training_data=True,
-                    suggested_questions=True,
-                    sql=True,
+                    suggested_questions=False,
+                    sql=False,
                     table=True,
                     csv_download=True,
-                    chart=True,
-                    redraw_chart=True,
+                    chart=False,
+                    redraw_chart=False,
                     auto_fix_sql=True,
                     ask_results_correct=True,
-                    followup_questions=True,
-                    summarization=True
+                    followup_questions=False,
+                    summarization=False
                  ):
         """
         Expose a Flask app that can be used to interact with a Vanna instance.
@@ -203,7 +235,10 @@ class VannaFlaskApp:
         self.followup_questions = followup_questions
         self.summarization = summarization
 
+        # 初始化日志系统，命名为"werkzeug"
         log = logging.getLogger("werkzeug")
+        
+        # 将日志级别设置为ERROR，只记录错误级别的日志信息
         log.setLevel(logging.ERROR)
 
         if "google.colab" in sys.modules:
@@ -218,10 +253,28 @@ class VannaFlaskApp:
 
         @self.flask_app.route("/auth/login", methods=["POST"])
         def login():
+            """
+            处理用户登录请求。
+
+            本函数通过调用auth模块的login_handler方法，处理Flask框架接收到的登录请求。
+            它不接受任何参数，直接使用flask.request对象作为login_handler的方法参数。
+
+            返回值:
+            - 根据auth模块的login_handler方法的实现，返回相应的处理结果，例如重定向到登录成功页面或返回错误信息。
+            """
             return self.auth.login_handler(flask.request)
 
         @self.flask_app.route("/auth/callback", methods=["GET"])
         def callback():
+            """
+            处理认证回调。
+
+            该函数用于处理外部服务（如OAuth提供商）的认证回调请求。它通过解析Flask请求对象，
+            并将其传递给认证模块的回调处理器，来处理认证流程的最后一步。
+
+            返回:
+                处理回调请求后的响应对象。
+            """
             return self.auth.callback_handler(flask.request)
 
         @self.flask_app.route("/auth/logout", methods=["GET"])
@@ -231,6 +284,21 @@ class VannaFlaskApp:
         @self.flask_app.route("/api/v0/get_config", methods=["GET"])
         @self.requires_auth
         def get_config(user: any):
+            """
+            根据用户信息获取配置信息。
+            
+            此函数生成一个包含各种配置设置的字典，这些设置可能影响应用程序的行为。
+            这些配置设置包括调试模式、徽标、标题、副标题、显示训练数据等。
+            接着，根据用户的权限，使用auth模块的override_config_for_user方法来覆盖或修改这些配置。
+            最后，将配置信息封装为JSON格式，以便通过API返回给客户端。
+            
+            参数:
+            user: any - 当前请求的用户信息。用户信息可以是任何类型，具体取决于应用程序的实现。
+            
+            返回:
+            jsonify - 包含配置信息的JSON响应对象。
+            """
+            # 初始化配置字典，包含各种应用程序配置设置
             config = {
                 "debug": self.debug,
                 "logo": self.logo,
@@ -249,8 +317,10 @@ class VannaFlaskApp:
                 "summarization": self.summarization,
             }
 
+            # 根据用户权限覆盖或修改配置
             config = self.auth.override_config_for_user(user, config)
 
+            # 将配置信息封装为JSON格式，准备返回给客户端
             return jsonify(
                 {
                     "type": "config",
@@ -317,17 +387,31 @@ class VannaFlaskApp:
         @self.flask_app.route("/api/v0/generate_sql", methods=["GET"])
         @self.requires_auth
         def generate_sql(user: any):
+            """
+            根据用户请求生成SQL查询语句。
+
+            该函数处理来自Flask应用程序的HTTP请求，并根据请求中的“question”参数生成相应的SQL语句。
+            如果生成的SQL语句有效，则返回包含SQL信息的JSON响应；否则，返回包含错误信息的JSON响应。
+
+            :param user: 当前操作的用户信息，参数类型为任意类型。
+            :return: 根据情况返回包含SQL信息或错误信息的JSON响应。
+            """
+            # 从请求参数中获取问题
             question = flask.request.args.get("question")
 
+            # 检查是否提供了问题，如果没有提供，则返回错误信息
             if question is None:
                 return jsonify({"type": "error", "error": "No question provided"})
 
+            # 为问题生成唯一ID，并根据问题生成SQL语句
             id = self.cache.generate_id(question=question)
             sql = vn.generate_sql(question=question, allow_llm_to_see_data=self.allow_llm_to_see_data)
 
+            # 将问题和生成的SQL语句存储到缓存中
             self.cache.set(id=id, field="question", value=question)
             self.cache.set(id=id, field="sql", value=sql)
 
+            # 检查生成的SQL语句是否有效，根据结果返回不同的JSON响应
             if vn.is_sql_valid(sql=sql):
                 return jsonify(
                     {
@@ -357,7 +441,7 @@ class VannaFlaskApp:
                             "error": "Please connect to a database using vn.connect_to_... in order to run SQL queries.",
                         }
                     )
-
+                
                 df = vn.run_sql(sql=sql)
 
                 self.cache.set(id=id, field="df", value=df)

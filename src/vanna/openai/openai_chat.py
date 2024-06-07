@@ -12,6 +12,7 @@ class OpenAI_Chat(VannaBase):
         # default parameters - can be overrided using config
         self.temperature = 0.7
         self.max_tokens = 500
+        self.base_url = ""
 
         if "temperature" in config:
             self.temperature = config["temperature"]
@@ -24,10 +25,8 @@ class OpenAI_Chat(VannaBase):
                 "Passing api_type is now deprecated. Please pass an OpenAI client instead."
             )
 
-        if "api_base" in config:
-            raise Exception(
-                "Passing api_base is now deprecated. Please pass an OpenAI client instead."
-            )
+        if "base_url" in config:
+            self.base_url = config["base_url"]
 
         if "api_version" in config:
             raise Exception(
@@ -42,7 +41,9 @@ class OpenAI_Chat(VannaBase):
             self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             return
 
-        if "api_key" in config:
+        if "api_key" in config and "base_url" != "":
+            self.client = OpenAI(api_key=config["api_key"], base_url=config["base_url"])
+        elif "api_key" in config:
             self.client = OpenAI(api_key=config["api_key"])
 
     def system_message(self, message: str) -> any:
