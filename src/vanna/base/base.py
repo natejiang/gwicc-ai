@@ -326,7 +326,8 @@ class VannaBase(ABC):
                 f"You are a helpful data assistant. The user asked the question: '{question}'\n\nThe following is a pandas DataFrame with the results of the query: \n{df.to_markdown()}\n\n"
             ),
             self.user_message(
-                "Briefly summarize the data based on the question that was asked. Do not respond with any additional explanation beyond the summary." +
+                # "Briefly summarize the data based on the question that was asked. Do not respond with any additional explanation beyond the summary." +
+                "根据所提问题简要总结数据。不要在总结之外作出任何额外的解释" + 
                 self._response_language()
             ),
         ]

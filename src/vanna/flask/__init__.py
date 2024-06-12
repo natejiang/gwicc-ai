@@ -4,6 +4,7 @@ import sys
 import uuid
 from abc import ABC, abstractmethod
 from functools import wraps
+import pandas as pd
 
 import flask
 import requests
@@ -13,6 +14,8 @@ from flask_sock import Sock
 from .assets import css_content, html_content, js_content
 from .auth import AuthInterface, NoAuth
 
+from .app import create_app, db
+from flask_login import login_required
 
 class Cache(ABC):
     """
@@ -169,10 +172,11 @@ class VannaFlaskApp:
     def __init__(self, vn, cache: Cache = MemoryCache(),
                     auth: AuthInterface = NoAuth(),
                     debug=True,
-                    allow_llm_to_see_data=False,
-                    logo="https://img.vanna.ai/vanna-flask.svg",
-                    title="Welcome to Vanna.AI",
-                    subtitle="Your AI-powered copilot for SQL queries.",
+                    allow_llm_to_see_data=True,
+                    # logo="https://img.vanna.ai/vanna-flask.svg",
+                    logo="https://2020hoohui.hoohui.cn/kindeditor/ba9ef9b6f61446a99f780457877a8515.png",
+                    title="Welcome to GW-ICC.AI",
+                    subtitle="GW-ICC.AI powered copilot for SQL queries.",
                     show_training_data=True,
                     suggested_questions=False,
                     sql=False,
@@ -183,7 +187,7 @@ class VannaFlaskApp:
                     auto_fix_sql=True,
                     ask_results_correct=True,
                     followup_questions=False,
-                    summarization=False
+                    summarization=True
                  ):
         """
         Expose a Flask app that can be used to interact with a Vanna instance.
@@ -212,7 +216,10 @@ class VannaFlaskApp:
         Returns:
             None
         """
-        self.flask_app = Flask(__name__)
+        self.flask_app = create_app('development')
+        self.app_context = self.flask_app.app_context()
+        self.app_context.push()
+        db.create_all()
         self.sock = Sock(self.flask_app)
         self.ws_clients = []
         self.vn = vn
@@ -606,6 +613,17 @@ class VannaFlaskApp:
         @self.requires_auth
         @self.requires_cache(["df", "question", "sql"])
         def generate_followup_questions(user: any, id: str, df, question, sql):
+            max_chars = 500
+            # 初始化新的 DataFrame 和字符计数
+            new_df = pd.DataFrame(columns=df.columns)
+            total_chars = 0
+            for _, row in df.iterrows():
+                row_char_count = row.apply(lambda x: len(str(x))).sum()
+                if total_chars + row_char_count > max_chars:
+                    break
+                new_df = pd.concat([new_df, pd.DataFrame([row])], ignore_index=True)
+                total_chars += row_char_count
+
             if self.allow_llm_to_see_data:
                 followup_questions = vn.generate_followup_questions(
                     question=question, sql=sql, df=df
@@ -638,8 +656,17 @@ class VannaFlaskApp:
         @self.requires_auth
         @self.requires_cache(["df", "question"])
         def generate_summary(user: any, id: str, df, question):
+            max_chars = 500
+            # 将 DataFrame 中所有元素转换为字符串，并计算每个元素的字符长度
+            char_lengths = df.map(lambda x: len(str(x)))
+            # 计算所有字符长度的总和
+            total_chars = char_lengths.sum().sum()
+
             if self.allow_llm_to_see_data:
-                summary = vn.generate_summary(question=question, df=df)
+                if total_chars > max_chars:
+                    summary = "由于表格数据过大，无法生成摘要"
+                else:
+                    summary = vn.generate_summary(question=question, df=df)
 
                 self.cache.set(id=id, field="summary", value=summary)
 
@@ -662,20 +689,27 @@ class VannaFlaskApp:
         @self.flask_app.route("/api/v0/load_question", methods=["GET"])
         @self.requires_auth
         @self.requires_cache(
-            ["question", "sql", "df", "fig_json"],
+            # ["question", "sql", "df", "fig_json"],
+            ["question", "sql", "df"],
             optional_fields=["summary"]
         )
-        def load_question(user: any, id: str, question, sql, df, fig_json, summary):
+        def load_question(user: any, id: str, question, sql, df, summary):
             try:
                 return jsonify(
+                    # {
+                    #     "type": "question_cache",
+                    #     "id": id,
+                    #     "question": question,
+                    #     "sql": sql,
+                    #     "df": df.head(10).to_json(orient="records", date_format="iso"),
+                    #     "fig": fig_json,
+                    #     "summary": summary,
+                    # }
                     {
-                        "type": "question_cache",
+                        "type": "df",
                         "id": id,
-                        "question": question,
-                        "sql": sql,
-                        "df": df.head(10).to_json(orient="records", date_format="iso"),
-                        "fig": fig_json,
-                        "summary": summary,
+                        "df": df.head(10).to_json(orient='records', date_format='iso'),
+                        "should_generate_chart": self.chart and vn.should_generate_chart(df),
                     }
                 )
 
@@ -746,6 +780,7 @@ class VannaFlaskApp:
 
         @self.flask_app.route("/", defaults={"path": ""})
         @self.flask_app.route("/<path:path>")
+        @login_required
         def hello(path: str):
             return html_content
 
