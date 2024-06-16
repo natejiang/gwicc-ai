@@ -15,7 +15,7 @@ from .assets import css_content, html_content, js_content
 from .auth import AuthInterface, NoAuth
 
 from .app import create_app, db
-from flask_login import login_required
+from flask_login import login_required, current_user
 
 class Cache(ABC):
     """
@@ -405,9 +405,11 @@ class VannaFlaskApp:
             """
             # 从请求参数中获取问题
             question = flask.request.args.get("question")
+            username = current_user.username
+            print("username:", username)
 
             # 检查是否提供了问题，如果没有提供，则返回错误信息
-            if question is None:
+            if question is None or question == "":
                 return jsonify({"type": "error", "error": "No question provided"})
 
             # 为问题生成唯一ID，并根据问题生成SQL语句
@@ -417,6 +419,7 @@ class VannaFlaskApp:
             # 将问题和生成的SQL语句存储到缓存中
             self.cache.set(id=id, field="question", value=question)
             self.cache.set(id=id, field="sql", value=sql)
+            self.cache.set(id=id, field="username", value=username)
 
             # 检查生成的SQL语句是否有效，根据结果返回不同的JSON响应
             if vn.is_sql_valid(sql=sql):
@@ -719,10 +722,12 @@ class VannaFlaskApp:
         @self.flask_app.route("/api/v0/get_question_history", methods=["GET"])
         @self.requires_auth
         def get_question_history(user: any):
+            questions = cache.get_all(field_list=["question", "username"])
+            history = [item for item in questions if item['username'] == current_user.username]
             return jsonify(
                 {
                     "type": "question_history",
-                    "questions": cache.get_all(field_list=["question"]),
+                    "questions": history,
                 }
             )
 
